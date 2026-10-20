@@ -77,7 +77,9 @@ export async function workerOperation(args) {
     retry:false, action:'No message id returned. Check Teams; do not resend.'};
   try {
     const stored = await svc.getConversationMessage(chat.id, messageId);
-    const verified = stored?.id === messageId && stored?.content === payload.content && stored?.clientmessageid === payload.clientmessageid;
+    // Teams inserts formatting CRLF after <br>; it is not additional message text.
+    const storedContent = stored?.content?.replace(/<br>\r\n/g, '<br>');
+    const verified = stored?.id === messageId && storedContent === payload.content && stored?.clientmessageid === payload.clientmessageid;
     return {status:verified?'PASS':'SEND_UNVERIFIED', chat, messageId,
       clientMessageId:payload.clientmessageid, verified, retry:false};
   } catch {

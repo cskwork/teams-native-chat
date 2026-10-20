@@ -22,7 +22,7 @@ The string `graphql` is the Teams client's internal state-machine key, not Micro
 
 Observed native route is `/api/chatsvc/<region>/v1/users/ME/conversations/<encoded-chat-id>/messages`. The adapter calls the service instead of hardcoding a region or bearer token. Native service model sets `authOptions.source='mfeService'` and handles the current authentication scheme. A raw legacy Skype token was not valid for this client's migrated authentication; do not replace native auth with token extraction.
 
-Observed message type is `RichText/Html`, content type `Text`; ordinary plain text is escaped into `<p>…</p>`. The observed self-chat ID is `48:notes`. Channel thread types are deliberately rejected. POST returns an ID derived from the Location header; readback must match both content and `clientmessageid`.
+Observed message type is `RichText/Html`, content type `Text`; ordinary plain text is escaped into `<p>…</p>`. The observed self-chat ID is `48:notes`. Channel thread types are deliberately rejected. POST returns an ID derived from the Location header; readback must match server ID, content, and `clientmessageid`. The server inserts formatting CRLF immediately after `<br>` in multiline group messages; normalize only that observed formatting before comparing content.
 
 Source inspection at verification time: worker factory `65647` exposed the state-machine context; conversation manager `74525`; chat service/model registration `66704`; request builders `34565` (`do` POST, `bO` GET conversation, `qi` GET message). These build-specific module numbers are evidence only and are not runtime dependencies.
 

@@ -30,6 +30,8 @@ import sys
 Path(os.environ['FAKE_EGO_MARKER']).write_text(sys.stdin.read())
 if os.environ['FAKE_EGO_MODE'] == 'malformed':
     print('TEAMS_NATIVE_RESULT {invalid json', file=sys.stderr)
+elif os.environ['FAKE_EGO_MODE'] == 'non-object':
+    print('TEAMS_NATIVE_RESULT []', file=sys.stderr)
 else:
     print('runner diagnostic', file=sys.stdout)
     print('TEAMS_NATIVE_RESULT ' + json.dumps({
@@ -75,6 +77,19 @@ else:
         self.assertEqual(session['spaceId'], 42)
         self.assertEqual(session['account']['id'], 'user-1')
         self.assertTrue(self.marker.exists())
+
+    def test_non_object_json_after_execute_is_unknown_without_retry(self):
+        self.configure_session()
+        self.env['FAKE_EGO_MODE'] = 'non-object'
+        process, result = self.invoke('send', '--chat-id', '19:mock', '--text', 'hello', '--execute')
+        self.assertEqual(process.returncode, 1)
+        self.assertEqual(result['status'], 'SEND_OUTCOME_UNKNOWN')
+        self.assertIs(result['retry'], False)
+        self.assertRegex(result['clientMessageId'], r'^\d+$')
+        self.assertTrue(self.marker.exists())
+        receipt = json.loads((self.state / 'last-send.json').read_text())
+        self.assertEqual(receipt['status'], 'SEND_OUTCOME_UNKNOWN')
+        self.assertEqual(receipt['clientMessageId'], result['clientMessageId'])
 
     def test_missing_session_fails_before_browser_invocation(self):
         process, result = self.invoke('status')

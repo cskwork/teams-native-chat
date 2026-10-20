@@ -154,6 +154,27 @@ test('readback content mismatch cannot pass', async () => {
   assert.equal(f.calls.post.length, 1);
 });
 
+test('readback accepts server CRLF inserted immediately after each literal br', async () => {
+  const f = fixture({stored:{id:'message-1', content:'<p>a<br>\r\nb<br>\r\n</p>',
+    clientmessageid:sendArgs.clientMessageId}});
+  const result = await f.run({execute:true, text:'a\nb\n'});
+  assert.equal(f.calls.post[0][1].content, '<p>a<br>b<br></p>');
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.verified, true);
+  assert.equal(f.calls.post.length, 1);
+  assert.equal(f.calls.read.length, 1);
+});
+
+test('normalizing server br CRLF does not hide changed actual text', async () => {
+  const f = fixture({stored:{id:'message-1', content:'<p>a<br>\r\nchanged<br>\r\n</p>',
+    clientmessageid:sendArgs.clientMessageId}});
+  const result = await f.run({execute:true, text:'a\nb\n'});
+  assert.equal(result.status, 'SEND_UNVERIFIED');
+  assert.equal(result.verified, false);
+  assert.equal(f.calls.post.length, 1);
+  assert.equal(f.calls.read.length, 1);
+});
+
 test('readback client message ID mismatch cannot pass', async () => {
   const f = fixture({stored:{id:'message-1', content:'<p>hello &lt;Teams&gt;<br>다음 줄</p>', clientmessageid:'other'}});
   const result = await f.run({execute:true});
