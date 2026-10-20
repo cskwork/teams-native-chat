@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Teams native web-client CLI. Uses ego-browser; never reads or stores tokens."""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import secrets
+import shutil
+import subprocess
+import sys
+import time
+
+STATE = Path(os.environ.get('TEAMS_NATIVE_STATE_DIR', str(Path.home()/'.local/state/teams-native-chat')))
+SCRIPT = Path(__file__).resolve().with_name('browser.mjs')
+PREFIX = 'TEAMS_NATIVE_RESULT '
+
+
+def persist(name, data):
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = STATE / name
+    temp = STATE / (name + '.tmp-' + secrets.token_hex(4))
+    fd = os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(temp, path)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest='command', required=True)
+    connect = sub.add_parser('connect', help='Open Teams or resume an agent-owned Teams task space')
+    connect.add_argument('--space', type=int, dest='space_id')
+    sub.add_parser('status')
+    chats = sub.add_parser('chats', help='List/search chats synchronized in Teams')
+    chats.add_argument('--query')
+    send = sub.add_parser('send', help='Preview by default; --execute sends once')
+    target = send.add_mutually_exclusive_group(required=True)
+    target.add_argument('--chat-id')
+    target.add_argument('--chat-name', help='Exact name; duplicates fail')
+    content = send.add_mutually_exclusive_group(required=True)
+    content.add_argument('--text')
+    content.add_argument('--text-file', help='UTF-8 plain text; use - for stdin')
+    mode = send.add_mutually_exclusive_group()
+    mode.add_argument('--execute', action='store_true')
+    mode.add_argument('--dry-run', action='store_true')
+    verify = sub.add_parser('verify', help='Read back a known sent message ID')
+    verify.add_argument('--chat-id', required=True)
+    verify.add_argument('--message-id', required=True)
+    sub.add_parser('close', help='Close the CLI task space; does not log out Teams')
+    opts = vars(p.parse_args())
+    command = opts['command']
+    args = {''.join([parts[0]]+[x.title() for x in parts[1:]]):v
+            for k,v in opts.items() if v is not None for parts in [k.split('_')]}
+    if command == 'send':
+        if opts.get('text_file'):
+            args['text'] = sys.stdin.read() if opts['text_file']=='-' else Path(opts['text_file']).read_text(encoding='utf-8')
+        text = args['text']
+        if not text.strip() or len(text.encode('utf-8')) > 20000:
+            p.error('text must contain non-whitespace and be at most 20000 UTF-8 bytes')
+        args['clientMessageId'] = str(time.time_ns()//1000*1000 + secrets.randbelow(1000))
+    if not shutil.which('ego-browser'):
+        print(json.dumps({'status':'BLOCKED','error':'EGO_BROWSER_NOT_INSTALLED'})); return 1
+    STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock = os.fdopen(os.open(STATE/'cli.lock', os.O_CREAT | os.O_RDWR, 0o600), 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(json.dumps({'status':'BLOCKED','error':'CLI_BUSY'})); return 1
+    config_file = STATE/'session.json'
+    if command == 'connect' and not args.get('spaceId') and config_file.exists():
+        args['spaceId'] = json.loads(config_file.read_text())['spaceId']
+    if command != 'connect':
+        if not config_file.exists():
+            print(json.dumps({'status':'BLOCKED','error':'RUN_CONNECT_FIRST'})); return 1
+        config = json.loads(config_file.read_text())
+        args.update(spaceId=config['spaceId'], account=config['account'])
+    if args.get('execute'):
+        persist('last-send.json', {'status':'PENDING','chatId':args.get('chatId'),
+            'chatName':args.get('chatName'),'clientMessageId':args['clientMessageId'],
+            'account':args.get('account'),'startedAt':time.time()})
+    source = 'const {run}=await import('+json.dumps(SCRIPT.as_uri())+');\n'
+    source += 'console.log('+json.dumps(PREFIX)+'+JSON.stringify(await run('+json.dumps(args,ensure_ascii=False)+')));\n'
+    try:
+        proc = subprocess.run(['ego-browser','nodejs'], input=source, text=True, capture_output=True, timeout=65)
+        lines = [line[len(PREFIX):] for line in (proc.stdout+'\n'+proc.stderr).splitlines() if line.startswith(PREFIX)]
+        result = json.loads(lines[-1]) if lines else {'status':'SEND_OUTCOME_UNKNOWN' if args.get('execute') else 'BLOCKED',
+            'error':'EGO_BROWSER_NO_RESULT','retry':False}
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        result = {'status':'SEND_OUTCOME_UNKNOWN' if args.get('execute') else 'BLOCKED', 'error':'BROWSER_TIMEOUT_OR_INVALID_RESULT','retry':False}
+    if not isinstance(result, dict):
+        result = {'status':'SEND_OUTCOME_UNKNOWN' if args.get('execute') else 'BLOCKED',
+                  'error':'INVALID_RESULT_SHAPE','retry':False}
+    result.setdefault('clientMessageId', args.get('clientMessageId'))
+    if command == 'connect' and result.get('status') == 'PASS':
+        persist('session.json', {'spaceId':result['spaceId'],'account':result['account']})
+    if args.get('execute'):
+        try:
+            persist('last-send.json', result)
+        except OSError:
+            result['receiptStored'] = False
+            result['warning'] = 'LOCAL_RECEIPT_WRITE_FAILED_DO_NOT_RESEND'
+    if command == 'close' and result.get('closed'):
+        config_file.unlink(missing_ok=True)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get('status') in ('PASS','DRY_RUN') else 1
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError):
+        print(json.dumps({'status':'FAIL','error':'LOCAL_INPUT_OR_STATE_ERROR'}))
+        sys.exit(1)
