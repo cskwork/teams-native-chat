@@ -41,6 +41,8 @@ def main():
     content = send.add_mutually_exclusive_group(required=True)
     content.add_argument('--text')
     content.add_argument('--text-file', help='UTF-8 plain text; use - for stdin')
+    send.add_argument('--link', nargs=2, action='append', dest='links', metavar=('LABEL', 'URL'),
+                      help='Render this exact text label as an HTTP(S) hyperlink; repeatable')
     mode = send.add_mutually_exclusive_group()
     mode.add_argument('--execute', action='store_true')
     mode.add_argument('--dry-run', action='store_true')

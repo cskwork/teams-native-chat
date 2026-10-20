@@ -1,6 +1,6 @@
 ---
 name: teams-native-chat
-description: Send plain-text messages as the signed-in user to a selected Microsoft Teams chat using the Teams web client's native chat service and ego-browser. Use for direct Teams chat sending without Microsoft Graph or Power Automate webhooks. Does not support channel posts, attachments, mentions, or threaded replies.
+description: Send text and explicit hyperlinks as the signed-in user to a selected Microsoft Teams chat using the Teams web client's native chat service and ego-browser. Use for direct Teams chat sending without Microsoft Graph or Power Automate webhooks. Does not support channel posts, attachments, mentions, or threaded replies.
 ---
 
 # Teams native chat
@@ -34,6 +34,8 @@ The user must authorize the destination and message intent. Creating this skill 
 ```
 
 Without `--execute`, `send` only previews. `--text` is supported; for multiline text use a UTF-8 file or `--text-file -` with stdin. Text is escaped as HTML, preserving line breaks. Limit: 20,000 UTF-8 bytes, a conservative CLI limit rather than a claimed Teams limit. Mention-like strings are plain text; no notifications/mentions are synthesized.
+
+Jira issue keys must be clickable in work announcements. Resolve the issue's real URL from the current project's configuration or source; do not invent its hostname. Pass `--link 'A20-1234' 'https://your-site.atlassian.net/browse/A20-1234'` with the same label in the message text. Repeat `--link LABEL URL` for multiple links. It emits an escaped HTML anchor; Markdown link syntax and bare issue keys otherwise remain plain text. Only HTTP(S) URLs without embedded credentials are accepted. Include identical link options in preview and execution.
 
 The script checks the connected account and live conversation, sends through the native no-retry transport once, and reads the message back. `PASS` with `verified:true` proves matching stored content and client message ID, not that recipients read it. Do not claim a deployment was independently verified when the user supplied that fact.
 

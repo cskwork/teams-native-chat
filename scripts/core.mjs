@@ -4,12 +4,26 @@ export function resolveChat(chats, id, name) {
   return hits[0];
 }
 
-export function buildMessage(chatId, text, user, clientId, now) {
+export function buildMessage(chatId, text, user, clientId, now, links = []) {
   if (typeof text !== 'string' || !text.trim()) throw new Error('EMPTY_MESSAGE');
   if (new TextEncoder().encode(text).length > 20000) throw new Error('TEXT_TOO_LARGE_20000_BYTES');
   if (!/^\d+$/.test(clientId)) throw new Error('INVALID_CLIENT_MESSAGE_ID');
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const escape = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
+  const targets = new Map();
+  for (const [label, address] of links) {
+    if (!label?.trim() || /[\r\n]/.test(label) || !text.includes(label) || targets.has(label))
+      throw new Error('INVALID_LINK_LABEL');
+    let url;
+    try { url = new URL(address); } catch { throw new Error('INVALID_LINK_URL'); }
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password)
+      throw new Error('INVALID_LINK_URL');
+    targets.set(label, url.href);
+  }
+  const labels = [...targets.keys()].sort((a,b) => b.length-a.length);
+  const pattern = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const escaped = labels.length ? text.split(new RegExp(`(${pattern})`, 'g')).map(part =>
+    targets.has(part) ? `<a href="${escape(targets.get(part))}">${escape(part)}</a>` : escape(part)).join('') : escape(text);
   const mri = `8:orgid:${user.id}`;
   return {id:'-1', type:'Message', conversationid:chatId, conversationLink:`blah/${chatId}`,
     from:mri, fromUserId:mri, composetime:now, originalarrivaltime:now,
@@ -58,9 +72,9 @@ export async function workerOperation(args) {
     return {status:m?.id === args.messageId ? 'PASS' : 'FAIL', chat, messageId:m?.id,
       clientMessageId:m?.clientmessageid, sender:m?.from, verified: m?.id === args.messageId};
   }
-  const payload = buildMessage(chat.id, args.text, user, args.clientMessageId, new Date().toISOString());
+  const payload = buildMessage(chat.id, args.text, user, args.clientMessageId, new Date().toISOString(), args.links);
   if (!args.execute) return {status:'DRY_RUN', account:user, chat, text:args.text,
-    clientMessageId:payload.clientmessageid, willSend:false};
+    links:args.links || [], clientMessageId:payload.clientmessageid, willSend:false};
   // Mark the irreversible boundary before invoking the native no-retry transport.
   let sent;
   try {

@@ -72,6 +72,57 @@ test('invalid client message IDs fail', () => {
     assert.throws(() => buildMessage(chat.id, 'text', user, id, 'now'), /INVALID_CLIENT_MESSAGE_ID/);
 });
 
+test('explicit hyperlink escapes query separators and HTML in the label', () => {
+  const label = 'Guide & <"spec">';
+  const message = buildMessage(chat.id, `Open ${label}.`, user, '123', 'now',
+    [[label, 'https://example.test/guide?lang=ko&v=1']]);
+  assert.equal(message.content,
+    '<p>Open <a href="https://example.test/guide?lang=ko&amp;v=1">Guide &amp; &lt;&quot;spec&quot;&gt;</a>.</p>');
+});
+
+test('URL attribute quotes are encoded and cannot introduce another attribute', () => {
+  const message = buildMessage(chat.id, 'Guide', user, '123', 'now',
+    [['Guide', 'https://example.test/?q=" onclick="alert(1)&v=2']]);
+  assert.equal(message.content,
+    '<p><a href="https://example.test/?q=%22%20onclick=%22alert(1)&amp;v=2">Guide</a></p>');
+});
+
+for (const address of ['javascript:alert(1)', 'data:text/html,hello',
+  'https://user:pass@example.test/', 'https://user@example.test/']) {
+  test(`unsafe or credential-bearing hyperlink is rejected: ${address}`, () => {
+    assert.throws(() => buildMessage(chat.id, 'Guide', user, '123', 'now',
+      [['Guide', address]]), /INVALID_LINK_URL/);
+  });
+}
+
+test('link labels must exist in text and cannot be configured twice', () => {
+  assert.throws(() => buildMessage(chat.id, 'Guide', user, '123', 'now',
+    [['Missing', 'https://example.test/']]), /INVALID_LINK_LABEL/);
+  assert.throws(() => buildMessage(chat.id, 'Guide', user, '123', 'now',
+    [['Guide', 'https://example.test/one'], ['Guide', 'https://example.test/two']]), /INVALID_LINK_LABEL/);
+});
+
+test('blank or multiline hyperlink labels are rejected', () => {
+  for (const label of [' ', '\n', 'a\nb'])
+    assert.throws(() => buildMessage(chat.id, `Guide ${label}`, user, '123', 'now',
+      [[label, 'https://example.test/']]), /INVALID_LINK_LABEL/);
+});
+
+test('regular expression metacharacters in a label match literally', () => {
+  const label = '.[x](v)+?*^$|\\';
+  const message = buildMessage(chat.id, `Open ${label} then .xv.`, user, '123', 'now',
+    [[label, 'https://example.test/']]);
+  assert.equal(message.content,
+    '<p>Open <a href="https://example.test/">.[x](v)+?*^$|\\</a> then .xv.</p>');
+});
+
+test('overlapping labels select the longest match and repeated text is linked', () => {
+  const message = buildMessage(chat.id, 'API v2 / API / API', user, '123', 'now',
+    [['API', 'https://example.test/v1'], ['API v2', 'https://example.test/v2']]);
+  assert.equal(message.content,
+    '<p><a href="https://example.test/v2">API v2</a> / <a href="https://example.test/v1">API</a> / <a href="https://example.test/v1">API</a></p>');
+});
+
 test('exact chat names resolve, partial names do not', () => {
   const chats = [{id:'a', name:'Team Alpha'}];
   assert.equal(resolveChat(chats, undefined, 'Team Alpha'), chats[0]);
@@ -93,6 +144,24 @@ test('dry-run validates the target and makes zero POSTs or readbacks', async () 
   assert.equal(f.calls.conversation.length, 1);
   assert.equal(f.calls.post.length, 0);
   assert.equal(f.calls.read.length, 0);
+});
+
+test('dry-run validates hyperlinks and makes zero POSTs', async () => {
+  const f = fixture();
+  const links = [['Guide', 'https://example.test/?a=1&b=2']];
+  const result = await f.run({text:'Open Guide', links});
+  assert.equal(result.status, 'DRY_RUN');
+  assert.equal(result.willSend, false);
+  assert.deepEqual(result.links, links);
+  assert.equal(f.calls.post.length, 0);
+  assert.equal(f.calls.read.length, 0);
+});
+
+test('invalid hyperlink on execute fails before POST', async () => {
+  const f = fixture();
+  await assert.rejects(f.run({execute:true, text:'Guide', links:[['Guide', 'javascript:alert(1)']]}),
+    /INVALID_LINK_URL/);
+  assert.equal(f.calls.post.length, 0);
 });
 
 test('execute makes exactly one native no-retry POST followed by exact readback', async () => {

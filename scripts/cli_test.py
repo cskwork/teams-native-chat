@@ -97,6 +97,21 @@ else:
         self.assertEqual(result, {'status':'BLOCKED', 'error':'RUN_CONNECT_FIRST'})
         self.assertFalse(self.marker.exists())
 
+    def test_repeatable_links_reach_runner_as_ordered_label_url_pairs(self):
+        self.configure_session()
+        links = [['문서 & 안내', 'https://example.test/docs?a=1&b=2'],
+                 ['API [v2]', 'https://example.test/api#v2']]
+        process, result = self.invoke('send', '--chat-id', '19:mock',
+                                      '--text', '문서 & 안내 및 API [v2]', '--dry-run',
+                                      '--link', *links[0], '--link', *links[1])
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(result['status'], 'PASS')
+        source = self.marker.read_text(encoding='utf-8')
+        args = json.loads(source.split('JSON.stringify(await run(', 1)[1].split(')));', 1)[0])
+        self.assertEqual(args['links'], links)
+        self.assertEqual(args['text'], '문서 & 안내 및 API [v2]')
+        self.assertFalse(args['execute'])
+
 
 if __name__ == '__main__':
     unittest.main()
