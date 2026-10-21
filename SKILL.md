@@ -25,6 +25,8 @@ Check the reported account and exact room. `chats` searches Teams' synchronized 
 
 ## Preview, send, verify
 
+Before drafting into an ongoing conversation, read the room's messages since the user's last one (Teams web DOM in the same task space) and any linked source they reference, such as new ticket comments. Draft against the newest question, name the exact item the message is about, and leave out what the room already knows.
+
 The user must authorize the destination and message intent. Creating this skill does not authorize announcements to coworkers. Once the user clearly requests a send, do not ask for redundant confirmation. A test send belongs in a confirmed self-chat or an explicitly designated test room.
 
 ```bash
