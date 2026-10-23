@@ -45,6 +45,25 @@ export function buildMessage(chatId, text, user, clientId, now, links = [], ment
       mentions:JSON.stringify(mentionProps),onbehalfof:null,files:'[]',policyViolation:null,formatVariant:'TEAMS'}, crossPostChannels:[]};
 }
 
+// Read-only: one raw Teams message -> the fields a reader needs. Raw HTML, tokens and
+// other properties never leave the worker. Returns null for system/deleted messages.
+export function sanitizeMessage(m) {
+  if (!m || typeof m !== 'object' || !/^(RichText\/Html|RichText|Text)$/.test(m.messagetype || '')) return null;
+  if (m.properties?.deletetime) return null;
+  const named = {amp:'&', lt:'<', gt:'>', quot:'"', apos:"'", nbsp:' '};
+  const code = n => Number.isInteger(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : '';
+  const text = String(m.content || '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|blockquote|h[1-6])>/gi, '\n').replace(/<[^>]*>/g, '')
+    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (all, e) => e[0] !== '#' ? (named[e.toLowerCase()] ?? all)
+      : code(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))))
+    .split('\n').map(line => line.replace(/[ \t ]+/g, ' ').trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  let raw = m.properties?.mentions;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
+  const mentions = [...new Set((Array.isArray(raw) ? raw : []).map(x => x?.mri).filter(x => typeof x === 'string' && /^8:orgid:[0-9a-f-]{36}$/i.test(x)))];
+  return {id:String(m.id ?? ''), time:m.originalarrivaltime || m.composetime || '', author:m.imdisplayname || '',
+    authorMri:String(m.from || '').split('/').pop(), text:text.slice(0, 4000), mentions};
+}
+
 // Runs inside the authenticated Teams web worker. No token crosses this boundary.
 export async function workerOperation(args) {
   const machine = self.workerServer?._stateAndRequestHandlers?.get('graphql')?.stateMachine;
@@ -59,6 +78,20 @@ export async function workerOperation(args) {
   if (!svc?.getMyConversation || !svc?.getConversationMessage || !svc?._transportWithNoRetry?.postMessageToConversation)
     throw new Error('TEAMS_INTERNAL_INTERFACE_CHANGED');
   if (args.command === 'status' || args.command === 'connect') return {status:'PASS', account:user};
+  if (args.command === 'messages') {
+    // Read-only room read: exact chat ID, newest first, sanitized fields only.
+    if (!args.chatId) throw new Error('CHAT_ID_REQUIRED');
+    if (!svc.getConversationMessages) throw new Error('TEAMS_INTERNAL_INTERFACE_CHANGED');
+    const remote = await svc.getMyConversation(args.chatId, crypto.randomUUID());
+    if (remote?.id !== args.chatId) throw new Error('CHAT_ID_MISMATCH');
+    if (remote.threadProperties?.threadType !== 'chat') throw new Error('UNSUPPORTED_CHAT_TYPE');
+    const limit = Math.min(Math.max(Number.parseInt(args.limit, 10) || 20, 1), 50);
+    const r = await svc.getConversationMessages({conversationId:args.chatId, id:args.chatId},
+      {id:crypto.randomUUID(), appendEventData() {}}, 1, '', limit);
+    if (!Array.isArray(r?.messages)) throw new Error('TEAMS_INTERNAL_INTERFACE_CHANGED');
+    return {status:'PASS', account:user, chat:{id:args.chatId, name:remote.threadProperties?.topic || args.chatId},
+      order:'newest-first', messages:r.messages.slice(0, limit).map(sanitizeMessage).filter(Boolean)};
+  }
   const raw = await ctx.managers.conversationManager.getConversations(undefined, 'teams-native-chat',
     {shouldSuppressL2LastMessageUpdates:true});
   if (!raw?.length) throw new Error('CHAT_CACHE_EMPTY_OR_UNAVAILABLE');

@@ -20,6 +20,7 @@ ln -s ~/.agents/skills/teams-native-chat/scripts/teams-native ~/.local/bin/teams
 ```bash
 teams-native connect
 teams-native chats --query '채팅방 이름'
+teams-native messages --chat-id '정확한 채팅방 ID' --limit 20   # 읽기 전용, 최신순·정제된 필드만
 teams-native send --chat-id '정확한 채팅방 ID' --text '전달할 내용' --dry-run
 teams-native send --chat-id '정확한 채팅방 ID' --text '전달할 내용' --execute
 teams-native close

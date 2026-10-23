@@ -48,6 +48,9 @@ def main():
     mode = send.add_mutually_exclusive_group()
     mode.add_argument('--execute', action='store_true')
     mode.add_argument('--dry-run', action='store_true')
+    messages = sub.add_parser('messages', help='Read-only: recent messages of an exact chat (sanitized, newest first)')
+    messages.add_argument('--chat-id', required=True)
+    messages.add_argument('--limit', type=int, default=20, help='1-50, default 20')
     verify = sub.add_parser('verify', help='Read back a known sent message ID')
     verify.add_argument('--chat-id', required=True)
     verify.add_argument('--message-id', required=True)
@@ -63,6 +66,8 @@ def main():
         if not text.strip() or len(text.encode('utf-8')) > 20000:
             p.error('text must contain non-whitespace and be at most 20000 UTF-8 bytes')
         args['clientMessageId'] = str(time.time_ns()//1000*1000 + secrets.randbelow(1000))
+    if command == 'messages' and not 1 <= args['limit'] <= 50:
+        p.error('--limit must be between 1 and 50')
     if not shutil.which('ego-browser'):
         print(json.dumps({'status':'BLOCKED','error':'EGO_BROWSER_NOT_INSTALLED'})); return 1
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)

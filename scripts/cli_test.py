@@ -113,5 +113,22 @@ else:
         self.assertFalse(args['execute'])
 
 
+    def test_messages_passes_exact_chat_and_limit_without_send_receipt(self):
+        self.configure_session()
+        process, result = self.invoke('messages', '--chat-id', '19:mock', '--limit', '7')
+        self.assertEqual(process.returncode, 0)
+        source = self.marker.read_text(encoding='utf-8')
+        args = json.loads(source.split('JSON.stringify(await run(', 1)[1].split(')));', 1)[0])
+        self.assertEqual((args['command'], args['chatId'], args['limit']), ('messages', '19:mock', 7))
+        self.assertNotIn('execute', args)
+        self.assertFalse((self.state / 'last-send.json').exists())
+
+    def test_messages_limit_out_of_range_fails_before_browser(self):
+        self.configure_session()
+        process = subprocess.run([sys.executable, str(CLI), 'messages', '--chat-id', '19:mock', '--limit', '51'],
+                                 env=self.env, text=True, capture_output=True, timeout=10)
+        self.assertEqual(process.returncode, 2)
+        self.assertFalse(self.marker.exists())
+
 if __name__ == '__main__':
     unittest.main()

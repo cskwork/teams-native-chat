@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {buildMessage, resolveChat, workerOperation} from './core.mjs';
+import {buildMessage, resolveChat, sanitizeMessage, workerOperation} from './core.mjs';
 
 const user = {id:'user-1', tenantId:'tenant-1', name:'사용자'};
 const chat = {id:'19:chat-1', threadProperties:{threadType:'chat', topic:'검증 채팅'}};
@@ -21,6 +21,10 @@ function fixture(options = {}) {
       if (options.readError) throw new Error('read failed');
       return options.stored ?? {id:'message-1', content:payload?.content,
         clientmessageid:payload?.clientmessageid, from:'8:orgid:user-1'};
+    },
+    getConversationMessages: async (...args) => {
+      calls.messages = [...(calls.messages || []), args];
+      return options.messages ?? {messages:[]};
     },
     addSflHeaders: () => ({mock:true}),
     _transportWithNoRetry: {
@@ -44,6 +48,7 @@ function fixture(options = {}) {
   const evaluate = new Function('self', 'crypto', 'TextEncoder',
     `const buildMessage=${buildMessage.toString()};
      const resolveChat=${resolveChat.toString()};
+     const sanitizeMessage=${sanitizeMessage.toString()};
      return (${workerOperation.toString()});`)(self, {randomUUID:() => 'mock-uuid'}, TextEncoder);
   return {calls, run:(args = {}) => evaluate({...sendArgs, ...args})};
 }
@@ -344,4 +349,48 @@ test('mention label absent from text or malformed MRI fails', () => {
 
 test('messages without mentions keep an empty mentions property', () => {
   assert.equal(buildMessage('c', 'hi', {id:'u', name:'n'}, '1', 'now').properties.mentions, '[]');
+});
+
+const MRI = '8:orgid:00000000-0000-4000-8000-000000000002';
+const raw = (over = {}) => ({id:'1761190000000', originalarrivaltime:'2026-10-23T01:00:00.000Z',
+  imdisplayname:'홍길동(Hong Gil dong) 선임', messagetype:'RichText/Html',
+  from:'https://apac.ng.msg.teams.microsoft.com/v1/users/ME/contacts/8:orgid:00000000-0000-4000-8000-000000000001',
+  content:'<p><span itemtype="http://schema.skype.com/Mention" itemscope="" itemid="0">김철수</span> &#51004;&#47196; 확인 &amp; 배포<br>A20-1 &lt;b&gt;</p>',
+  properties:{mentions:JSON.stringify([{itemid:0, mri:MRI, mentionType:'person'}])}, skypeguid:'secret-ish', ...over});
+
+test('sanitizeMessage strips HTML, unescapes entities and keeps only reader fields', () => {
+  assert.deepEqual(sanitizeMessage(raw()), {id:'1761190000000', time:'2026-10-23T01:00:00.000Z',
+    author:'홍길동(Hong Gil dong) 선임', authorMri:'8:orgid:00000000-0000-4000-8000-000000000001',
+    text:'김철수 으로 확인 & 배포\nA20-1 <b>', mentions:[MRI]});
+});
+
+test('sanitizeMessage drops system and deleted messages and tolerates malformed mentions', () => {
+  assert.equal(sanitizeMessage(raw({messagetype:'ThreadActivity/AddMember'})), null);
+  assert.equal(sanitizeMessage(raw({properties:{deletetime:'1'}})), null);
+  assert.deepEqual(sanitizeMessage(raw({properties:{mentions:'{bad'}})).mentions, []);
+  assert.equal(sanitizeMessage(raw({content:'&#0;&#xD800;&unknown;x'})).text, '&unknown;x');
+});
+
+test('messages reads an exact chat once, sanitized, with no POST or readback', async () => {
+  const f = fixture({messages:{messages:[raw(), raw({messagetype:'Event/Call'})]}});
+  const result = await f.run({command:'messages', chatId:chat.id, limit:'5', text:undefined});
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.order, 'newest-first');
+  assert.equal(result.messages.length, 1);
+  assert.deepEqual(Object.keys(result.messages[0]).sort(), ['author', 'authorMri', 'id', 'mentions', 'text', 'time']);
+  assert.equal(f.calls.messages.length, 1);
+  assert.deepEqual(f.calls.messages[0][0], {conversationId:chat.id, id:chat.id});
+  assert.equal(f.calls.messages[0][4], 5);
+  assert.equal(f.calls.post.length, 0);
+  assert.equal(f.calls.read.length, 0);
+});
+
+test('messages clamps the limit and rejects a mismatched or non-chat target', async () => {
+  const f = fixture();
+  await f.run({command:'messages', chatId:chat.id, limit:999});
+  assert.equal(f.calls.messages[0][4], 50);
+  await assert.rejects(fixture({remote:{id:'other'}}).run({command:'messages', chatId:chat.id}), /CHAT_ID_MISMATCH/);
+  await assert.rejects(fixture({remote:{id:chat.id, threadProperties:{threadType:'space'}}}).run({command:'messages', chatId:chat.id}),
+    /UNSUPPORTED_CHAT_TYPE/);
+  await assert.rejects(fixture().run({command:'messages', chatId:undefined}), /CHAT_ID_REQUIRED/);
 });

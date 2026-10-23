@@ -1,4 +1,4 @@
-import {buildMessage, resolveChat, workerOperation} from './core.mjs';
+import {buildMessage, resolveChat, sanitizeMessage, workerOperation} from './core.mjs';
 
 export async function workerEval(page, task, expression) {
   const pageId = (await page.cdp('Target.getTargetInfo')).targetInfo.targetId;
@@ -47,7 +47,7 @@ export async function run(args) {
       }
       page = task.page('p1');
     }
-    const expression = `(()=>{const buildMessage=${buildMessage.toString()};const resolveChat=${resolveChat.toString()};return (${workerOperation.toString()})(${JSON.stringify(args)}).catch(e=>({status:'FAIL',error: /^[A-Z][A-Z0-9_]+$/.test(e.message||'')?e.message:'TEAMS_NATIVE_REQUEST_FAILED'}));})()`;
+    const expression = `(()=>{const buildMessage=${buildMessage.toString()};const resolveChat=${resolveChat.toString()};const sanitizeMessage=${sanitizeMessage.toString()};return (${workerOperation.toString()})(${JSON.stringify(args)}).catch(e=>({status:'FAIL',error: /^[A-Z][A-Z0-9_]+$/.test(e.message||'')?e.message:'TEAMS_NATIVE_REQUEST_FAILED'}));})()`;
     let result;
     const deadline = Date.now()+35000;
     do {

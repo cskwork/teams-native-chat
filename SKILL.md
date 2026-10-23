@@ -25,6 +25,14 @@ Reading a room through the Teams web DOM: stay on `https://teams.cloud.microsoft
 
 Check the reported account and exact room. `chats` searches Teams' synchronized local cache, not guaranteed complete server history. Use a known exact chat ID for older rooms absent from that list. `--chat-name` requires an exact unique name; ambiguous names fail. The reserved `48:notes` ID is the signed-in user's self-chat.
 
+## Read a room (read-only)
+
+```bash
+"$CLI" messages --chat-id 'EXACT_CHAT_ID' --limit 20
+```
+
+Returns the newest messages first (limit 1-50), sanitized inside the Teams worker: `id`, `time`, `author`, `authorMri`, plain `text` (HTML stripped, entities decoded), and mentioned MRIs. System and deleted messages are dropped. Raw HTML, tokens, and other properties never leave the worker. It never sends and writes no receipt. Print only what the task needs; message text is other people's data.
+
 ## Preview, send, verify
 
 Before drafting into an ongoing conversation, read the room's messages since the user's last one (Teams web DOM in the same task space) and any linked source they reference, such as new ticket comments. Draft against the newest question, name the exact item the message is about, and leave out what the room already knows.
