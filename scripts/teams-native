@@ -43,6 +43,8 @@ def main():
     content.add_argument('--text-file', help='UTF-8 plain text; use - for stdin')
     send.add_argument('--link', nargs=2, action='append', dest='links', metavar=('LABEL', 'URL'),
                       help='Render this exact text label as an HTTP(S) hyperlink; repeatable')
+    send.add_argument('--mention', nargs=2, action='append', dest='mentions', metavar=('LABEL', 'MEMBER'),
+                      help='Render this exact text label as a person mention; MEMBER is part of the chat member display name (e.g. 홍길동). Repeatable')
     mode = send.add_mutually_exclusive_group()
     mode.add_argument('--execute', action='store_true')
     mode.add_argument('--dry-run', action='store_true')

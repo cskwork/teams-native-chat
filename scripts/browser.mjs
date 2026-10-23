@@ -35,8 +35,10 @@ export async function run(args) {
       task = await taskSpace(args.spaceId ?? 'teams-native-chat');
       page = task.page('p1');
       const url = await page.url();
-      if (!url.startsWith('https://teams.cloud.microsoft/') && !url.startsWith('https://teams.microsoft.com/'))
-        await page.goto('https://teams.microsoft.com/v2/');
+      // workerEval only attaches to the teams.cloud.microsoft worker; a page left on
+      // teams.microsoft.com (e.g. after opening a deep link) never becomes ready.
+      if (!url.startsWith('https://teams.cloud.microsoft/'))
+        await page.goto('https://teams.cloud.microsoft/');
     } else {
       task = await taskSpace(args.spaceId);
       if (args.command === 'close') {
@@ -49,7 +51,14 @@ export async function run(args) {
     let result;
     const deadline = Date.now()+35000;
     do {
-      try { result = await workerEval(page,task,expression); break; }
+      try {
+        result = await workerEval(page,task,expression);
+        // A freshly opened Teams page exposes the worker before its chat service is wired.
+        if (args.command === 'connect' && result?.error === 'TEAMS_INTERNAL_INTERFACE_CHANGED' && Date.now() < deadline) {
+          await new Promise(r=>setTimeout(r,1000)); continue;
+        }
+        break;
+      }
       catch (e) {
         if (args.command !== 'connect' || e.message !== 'TEAMS_WORKER_NOT_READY' || Date.now() >= deadline) throw e;
         await new Promise(r=>setTimeout(r,500));

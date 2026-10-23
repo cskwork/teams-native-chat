@@ -327,3 +327,21 @@ test('explicit verify reads a known message without POST', async () => {
   assert.deepEqual(f.calls.read, [[chat.id, 'message-1']]);
   assert.equal(f.calls.post.length, 0);
 });
+
+test('mention renders a Teams person span and matching properties.mentions', () => {
+  const mri = '8:orgid:00000000-0000-4000-8000-000000000001';
+  const p = buildMessage('19:x@thread.v2', '홍길동 선임님 계정 만들었어요 A20-1', {id:'u', name:'me'}, '123', 'now',
+    [['A20-1', 'https://example.atlassian.net/browse/A20-1']], [['홍길동 선임님', mri]]);
+  assert.equal(p.content, '<p><span itemtype="http://schema.skype.com/Mention" itemscope="" itemid="0">홍길동 선임님</span> 계정 만들었어요 <a href="https://example.atlassian.net/browse/A20-1">A20-1</a></p>');
+  assert.deepEqual(JSON.parse(p.properties.mentions), [{'@type':'http://schema.skype.com/Mention', itemid:0, mri,
+    mentionType:'person', displayName:'홍길동 선임님'}]);
+});
+
+test('mention label absent from text or malformed MRI fails', () => {
+  assert.throws(() => buildMessage('c', 'hello', {id:'u', name:'n'}, '1', 'now', [], [['길동', '8:orgid:00000000-0000-4000-8000-000000000001']]), /INVALID_MENTION_LABEL/);
+  assert.throws(() => buildMessage('c', '길동 hello', {id:'u', name:'n'}, '1', 'now', [], [['길동', 'bad']]), /INVALID_MENTION_MRI/);
+});
+
+test('messages without mentions keep an empty mentions property', () => {
+  assert.equal(buildMessage('c', 'hi', {id:'u', name:'n'}, '1', 'now').properties.mentions, '[]');
+});

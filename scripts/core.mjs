@@ -4,7 +4,8 @@ export function resolveChat(chats, id, name) {
   return hits[0];
 }
 
-export function buildMessage(chatId, text, user, clientId, now, links = []) {
+// mentions: [[label, mri]] — label must appear in text; rendered as a Teams person mention.
+export function buildMessage(chatId, text, user, clientId, now, links = [], mentions = []) {
   if (typeof text !== 'string' || !text.trim()) throw new Error('EMPTY_MESSAGE');
   if (new TextEncoder().encode(text).length > 20000) throw new Error('TEXT_TOO_LARGE_20000_BYTES');
   if (!/^\d+$/.test(clientId)) throw new Error('INVALID_CLIENT_MESSAGE_ID');
@@ -20,17 +21,28 @@ export function buildMessage(chatId, text, user, clientId, now, links = []) {
       throw new Error('INVALID_LINK_URL');
     targets.set(label, url.href);
   }
-  const labels = [...targets.keys()].sort((a,b) => b.length-a.length);
+  const mentionIds = new Map();
+  for (const [label, mri] of mentions) {
+    if (!label?.trim() || /[\r\n]/.test(label) || !text.includes(label) || targets.has(label) || mentionIds.has(label))
+      throw new Error('INVALID_MENTION_LABEL');
+    if (!/^8:orgid:[0-9a-f-]{36}$/.test(mri || '')) throw new Error('INVALID_MENTION_MRI');
+    mentionIds.set(label, {itemid:mentionIds.size, mri});
+  }
+  const labels = [...targets.keys(), ...mentionIds.keys()].sort((a,b) => b.length-a.length);
   const pattern = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const escaped = labels.length ? text.split(new RegExp(`(${pattern})`, 'g')).map(part =>
-    targets.has(part) ? `<a href="${escape(targets.get(part))}">${escape(part)}</a>` : escape(part)).join('') : escape(text);
+    targets.has(part) ? `<a href="${escape(targets.get(part))}">${escape(part)}</a>`
+      : mentionIds.has(part) ? `<span itemtype="http://schema.skype.com/Mention" itemscope="" itemid="${mentionIds.get(part).itemid}">${escape(part)}</span>`
+      : escape(part)).join('') : escape(text);
+  const mentionProps = [...mentionIds].map(([label, m]) => ({'@type':'http://schema.skype.com/Mention',
+    itemid:m.itemid, mri:m.mri, mentionType:'person', displayName:label}));
   const mri = `8:orgid:${user.id}`;
   return {id:'-1', type:'Message', conversationid:chatId, conversationLink:`blah/${chatId}`,
     from:mri, fromUserId:mri, composetime:now, originalarrivaltime:now,
     content:`<p>${escaped}</p>`, messagetype:'RichText/Html', contenttype:'Text',
     imdisplayname:user.name, clientmessageid:clientId, callId:'', state:0, version:'0',
     amsreferences:[], properties:{importance:'',subject:'',title:'',cards:'[]',links:'[]',
-      mentions:'[]',onbehalfof:null,files:'[]',policyViolation:null,formatVariant:'TEAMS'}, crossPostChannels:[]};
+      mentions:JSON.stringify(mentionProps),onbehalfof:null,files:'[]',policyViolation:null,formatVariant:'TEAMS'}, crossPostChannels:[]};
 }
 
 // Runs inside the authenticated Teams web worker. No token crosses this boundary.
@@ -72,9 +84,28 @@ export async function workerOperation(args) {
     return {status:m?.id === args.messageId ? 'PASS' : 'FAIL', chat, messageId:m?.id,
       clientMessageId:m?.clientmessageid, sender:m?.from, verified: m?.id === args.messageId};
   }
-  const payload = buildMessage(chat.id, args.text, user, args.clientMessageId, new Date().toISOString(), args.links);
+  // --mention LABEL MEMBER: MEMBER is matched against display names of current chat members seen in recent messages.
+  const mentions = [];
+  if (args.mentions?.length) {
+    const roster = await svc.getThreadMembers(chat.id);
+    const memberIds = new Set((roster?.members || []).map(x => x.id));
+    const recent = await svc.getConversationMessages({conversationId:chat.id}, crypto.randomUUID());
+    const names = new Map();
+    for (const x of recent?.messages || []) {
+      const mri = (x.from || '').split('/').pop();
+      if (memberIds.has(mri) && x.imdisplayname) names.set(mri, x.imdisplayname);
+    }
+    for (const [label, who] of args.mentions) {
+      const hits = [...names].filter(([, n]) => n.includes(who));
+      if (hits.length !== 1) throw new Error(hits.length ? 'AMBIGUOUS_MENTION_MEMBER' : 'MENTION_MEMBER_NOT_FOUND');
+      mentions.push([label, hits[0][0], hits[0][1]]);
+    }
+  }
+  const payload = buildMessage(chat.id, args.text, user, args.clientMessageId, new Date().toISOString(), args.links,
+    mentions.map(([label, mri]) => [label, mri]));
   if (!args.execute) return {status:'DRY_RUN', account:user, chat, text:args.text,
-    links:args.links || [], clientMessageId:payload.clientmessageid, willSend:false};
+    links:args.links || [], mentions:mentions.map(([label, mri, name]) => ({label, member:name, mri})),
+    clientMessageId:payload.clientmessageid, willSend:false};
   // Mark the irreversible boundary before invoking the native no-retry transport.
   let sent;
   try {

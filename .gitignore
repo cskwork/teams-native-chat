@@ -7,3 +7,6 @@ state/
 *-receipt.json
 session.json
 last-send.json
+
+# 사용자 말투 프로필(개인 데이터, 커밋 금지)
+voice/

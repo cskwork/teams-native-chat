@@ -1,6 +1,6 @@
 ---
 name: teams-native-chat
-description: Send text and explicit hyperlinks as the signed-in user to a selected Microsoft Teams chat using the Teams web client's native chat service and ego-browser. Use for direct Teams chat sending without Microsoft Graph or Power Automate webhooks. Does not support channel posts, attachments, mentions, or threaded replies.
+description: Send text and explicit hyperlinks as the signed-in user to a selected Microsoft Teams chat using the Teams web client's native chat service and ego-browser. Use for direct Teams chat sending without Microsoft Graph or Power Automate webhooks. Supports person mentions in group chats. Does not support channel posts, attachments, or threaded replies.
 ---
 
 # Teams native chat
@@ -21,6 +21,8 @@ CLI="$HOME/.agents/skills/teams-native-chat/scripts/teams-native"
 When installed elsewhere, use this skill's actual `scripts/teams-native` path.
 `connect --space ID` resumes an existing agent-owned task space with Teams on `p1`. Reuse one task space for the user's goal. Never claim a user-owned space or bypass user control. If login/consent is needed, hand the browser to the user and resume after they finish.
 
+Reading a room through the Teams web DOM: stay on `https://teams.cloud.microsoft/` and open the chat from the chat list. Do not open `teams.microsoft.com` deep links in `p1`; that leaves the native worker unattachable (`TEAMS_WORKER_NOT_READY`) until `connect` navigates back.
+
 Check the reported account and exact room. `chats` searches Teams' synchronized local cache, not guaranteed complete server history. Use a known exact chat ID for older rooms absent from that list. `--chat-name` requires an exact unique name; ambiguous names fail. The reserved `48:notes` ID is the signed-in user's self-chat.
 
 ## Preview, send, verify
@@ -35,7 +37,9 @@ The user must authorize the destination and message intent. Creating this skill 
 "$CLI" verify --chat-id 'EXACT_CHAT_ID' --message-id 'RETURNED_MESSAGE_ID'
 ```
 
-Without `--execute`, `send` only previews. `--text` is supported; for multiline text use a UTF-8 file or `--text-file -` with stdin. Text is escaped as HTML, preserving line breaks. Limit: 20,000 UTF-8 bytes, a conservative CLI limit rather than a claimed Teams limit. Mention-like strings are plain text; no notifications/mentions are synthesized.
+Without `--execute`, `send` only previews. `--text` is supported; for multiline text use a UTF-8 file or `--text-file -` with stdin. Text is escaped as HTML, preserving line breaks. Limit: 20,000 UTF-8 bytes, a conservative CLI limit rather than a claimed Teams limit. Typing `@name` stays plain text.
+
+Mentions: when a message asks or answers a specific person, add `--mention LABEL MEMBER` so they get notified. LABEL is exact text in the message (e.g. `홍길동 선임님`); MEMBER is part of a chat member's display name (e.g. `홍길동`). The member must appear among the chat's recent message senders; zero or multiple matches fail before sending (`MENTION_MEMBER_NOT_FOUND` / `AMBIGUOUS_MENTION_MEMBER`). The preview shows the resolved member and MRI. Self-chat (`48:notes`) has no roster, so mentions there fail before sending.
 
 Jira issue keys must be clickable in work announcements. Resolve the issue's real URL from the current project's configuration or source; do not invent its hostname. Pass `--link 'A20-1234' 'https://your-site.atlassian.net/browse/A20-1234'` with the same label in the message text. Repeat `--link LABEL URL` for multiple links. It emits an escaped HTML anchor; Markdown link syntax and bare issue keys otherwise remain plain text. Only HTTP(S) URLs without embedded credentials are accepted. Include identical link options in preview and execution.
 
@@ -61,3 +65,11 @@ python3 scripts/teams-native --help
 ```
 
 Offline tests do not prove the current Teams client interface still works. Verify an intentional self-chat send after adapter changes, only within the user's authorization.
+
+## Write in the user's voice
+
+When the user asks to send "in my voice" (내 말투로), write the message from the local voice profile `voice/user-voice.md` in this skill directory. That directory is personal data and is gitignored; never commit it or copy it into the repository.
+
+- No profile yet: read the user's own recent messages in the target room (Teams web DOM via the same task space, author name equals the connected account), save short verbatim samples plus traits to `voice/user-voice.md`, then draft.
+- Update the profile when the user corrects the tone; keep samples short and free of other people's messages or personal data.
+- Keep facts exact (ticket, environment, build, what was not verified) while matching the voice; tone never removes a limitation.
