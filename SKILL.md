@@ -19,7 +19,7 @@ CLI="$HOME/.agents/skills/teams-native-chat/scripts/teams-native"
 ```
 
 When installed elsewhere, use this skill's actual `scripts/teams-native` path.
-`connect --space ID` resumes an existing agent-owned task space with Teams on `p1`. Reuse one task space for the user's goal. Never claim a user-owned space or bypass user control. If login/consent is needed, hand the browser to the user and resume after they finish.
+`connect --space ID` resumes an existing agent-owned task space with Teams on `p1`. Reuse one task space for the user's goal. If the saved space is gone (ego restart), other commands return `TASK_SPACE_NOT_FOUND`; run `connect` once and it opens a new agent-owned space on the same profile. Never claim a user-owned space or bypass user control. If login/consent is needed, hand the browser to the user and resume after they finish.
 
 Reading a room through the Teams web DOM: stay on `https://teams.cloud.microsoft/` and open the chat from the chat list. Do not open `teams.microsoft.com` deep links in `p1`; that leaves the native worker unattachable (`TEAMS_WORKER_NOT_READY`) until `connect` navigates back.
 

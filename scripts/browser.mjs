@@ -28,11 +28,22 @@ export async function workerEval(page, task, expression) {
   }
 }
 
+// ego restarts drop task spaces, so a saved space id can disappear. connect then opens a new
+// agent-owned space on the same profile (same Teams login); other commands report it as a code.
+async function connectSpace(spaceId) {
+  if (spaceId == null) return taskSpace('teams-native-chat');
+  try { return await taskSpace(spaceId); }
+  catch (e) {
+    if (!/task space not found/i.test(e.message || '')) throw e;
+    return taskSpace('teams-native-chat');
+  }
+}
+
 export async function run(args) {
   let task, page;
   try {
     if (args.command === 'connect') {
-      task = await taskSpace(args.spaceId ?? 'teams-native-chat');
+      task = await connectSpace(args.spaceId);
       page = task.page('p1');
       const url = await page.url();
       // workerEval only attaches to the teams.cloud.microsoft worker; a page left on
@@ -67,8 +78,10 @@ export async function run(args) {
     return {...result, spaceId:task.spaceId};
   } catch (e) {
     // A timeout after an execute request must never trigger another POST.
+    const message = e.message || '';
     return {status:args.execute?'SEND_OUTCOME_UNKNOWN':'BLOCKED',
-      error: /^[A-Z][A-Z0-9_]+$/.test(e.message||'')?e.message:'BROWSER_UNAVAILABLE_OR_CONTROL_REQUIRED',
+      error: /^[A-Z][A-Z0-9_]+$/.test(message)?message
+        : /task space not found/i.test(message)?'TASK_SPACE_NOT_FOUND':'BROWSER_UNAVAILABLE_OR_CONTROL_REQUIRED',
       spaceId:task?.spaceId, retry:false, clientMessageId:args.clientMessageId};
   }
 }
