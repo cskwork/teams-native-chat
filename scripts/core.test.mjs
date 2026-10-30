@@ -385,6 +385,17 @@ test('messages reads an exact chat once, sanitized, with no POST or readback', a
   assert.equal(f.calls.read.length, 0);
 });
 
+test('messages reads the self-chat but no other streamofnotes thread', async () => {
+  const selfChat = {id:'48:notes', threadProperties:{threadType:'streamofnotes'}};
+  const f = fixture({remote:selfChat, messages:{messages:[raw()]}});
+  const result = await f.run({command:'messages', chatId:'48:notes', limit:'3', text:undefined});
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.messages.length, 1);
+  assert.equal(f.calls.post.length, 0);
+  const other = {id:'19:other', threadProperties:{threadType:'streamofnotes'}};
+  await assert.rejects(fixture({remote:other}).run({command:'messages', chatId:'19:other'}), /UNSUPPORTED_CHAT_TYPE/);
+});
+
 test('messages clamps the limit and rejects a mismatched or non-chat target', async () => {
   const f = fixture();
   await f.run({command:'messages', chatId:chat.id, limit:999});

@@ -23,7 +23,7 @@ When installed elsewhere, use this skill's actual `scripts/teams-native` path.
 
 Reading a room through the Teams web DOM: stay on `https://teams.cloud.microsoft/` and open the chat from the chat list. Do not open `teams.microsoft.com` deep links in `p1`; that leaves the native worker unattachable (`TEAMS_WORKER_NOT_READY`) until `connect` navigates back.
 
-Check the reported account and exact room. `chats` searches Teams' synchronized local cache, not guaranteed complete server history. Use a known exact chat ID for older rooms absent from that list. `--chat-name` requires an exact unique name; ambiguous names fail. The reserved `48:notes` ID is the signed-in user's self-chat.
+Check the reported account and exact room. `chats` searches Teams' synchronized local cache, not guaranteed complete server history. Use a known exact chat ID for older rooms absent from that list. `--chat-name` requires an exact unique name; ambiguous names fail. The reserved `48:notes` ID is the signed-in user's self-chat; `send` and `messages` both accept it.
 
 ## Read a room (read-only)
 

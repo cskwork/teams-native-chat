@@ -84,7 +84,9 @@ export async function workerOperation(args) {
     if (!svc.getConversationMessages) throw new Error('TEAMS_INTERNAL_INTERFACE_CHANGED');
     const remote = await svc.getMyConversation(args.chatId, crypto.randomUUID());
     if (remote?.id !== args.chatId) throw new Error('CHAT_ID_MISMATCH');
-    if (remote.threadProperties?.threadType !== 'chat') throw new Error('UNSUPPORTED_CHAT_TYPE');
+    // The self-chat is a streamofnotes thread; send already accepts it (see below), so reads do too.
+    if (remote.threadProperties?.threadType !== 'chat' && !(args.chatId === '48:notes' && remote.threadProperties?.threadType === 'streamofnotes'))
+      throw new Error('UNSUPPORTED_CHAT_TYPE');
     const limit = Math.min(Math.max(Number.parseInt(args.limit, 10) || 20, 1), 50);
     const r = await svc.getConversationMessages({conversationId:args.chatId, id:args.chatId},
       {id:crypto.randomUUID(), appendEventData() {}}, 1, '', limit);
